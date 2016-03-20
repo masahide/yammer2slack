@@ -1,0 +1,6 @@
+package yammer
+
+var (
+	clientId     = "xxxxxxxxxxxxfa"
+	clientSecret = "falsdfjaslfkjsalfkjaslfkjasldfkjalj"
+)
