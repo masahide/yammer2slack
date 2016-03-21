@@ -21,8 +21,8 @@ const (
 
 var (
 	lsConfig  yammer.LocalServerConfig
-	loopNum   = 60 * 60 * 24 * 365 * 5
-	sleepTime = 10 * time.Second
+	loopNum   = 1
+	sleepTime = 120 * time.Second
 	api       = slack.New(key)
 	channels  = map[string]*slack.Channel{}
 	key       = loadSlackKey(slackFile)
@@ -65,17 +65,19 @@ func init() {
 	flag.DurationVar(&sleepTime, "s", sleepTime, "sleep time")
 	flag.Parse()
 }
-func getChannels() {
+func getChannels() error {
 	if len(channels) != 0 {
-		return
+		return nil
 	}
 	chs, err := api.GetChannels(false)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return err
 	}
 	for i := range chs {
 		channels[chs[i].Name] = &chs[i]
 	}
+	return nil
 }
 
 func main() {
@@ -109,7 +111,9 @@ func main() {
 		}
 		select {
 		case <-run:
-			log.Printf("start getMessage:%d", i)
+			if loopNum != 1 {
+				log.Printf("start getMessage:%d", i)
+			}
 			i++
 			go func(run chan bool) {
 				getsAndSends(y)
@@ -132,15 +136,20 @@ func getsAndSends(y *yammer.Yammer) {
 func getAndSend(lastId int, getMsgFunc func(int, int) ([]byte, error)) int {
 	msgJson, err := getMsgFunc(lastId, 0)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return lastId
 	}
 	messages := getMessages(msgJson)
 	if len(messages) != 0 {
-		getChannels()
-		lastId = messages[0].Id
-		for i := len(messages) - 1; i >= 0; i-- {
-			postMsg(&messages[i])
+		if err := getChannels(); err != nil {
+			return lastId
 		}
+		for i := len(messages) - 1; i >= 0; i-- {
+			if err := postMsg(&messages[i]); err != nil {
+				return lastId
+			}
+		}
+		lastId = messages[0].Id
 	}
 	return lastId
 
@@ -195,7 +204,8 @@ type LastId struct {
 func getMessages(msgJson []byte) []Msg {
 	js, err := simplejson.NewJson(msgJson)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return []Msg{}
 	}
 	refs := js.Get("references")
 	users := map[int]User{}
@@ -241,7 +251,7 @@ func getMessages(msgJson []byte) []Msg {
 	return messages
 }
 
-func postMsg(m *Msg) {
+func postMsg(m *Msg) error {
 	chanName := strconv.Itoa(m.ThreadId)
 	if m.Dm {
 		chanName = "_dm_" + chanName
@@ -254,11 +264,13 @@ func postMsg(m *Msg) {
 	if !ok {
 		ch, err = api.CreateChannel(chanName)
 		if err != nil {
-			log.Fatalf("CreateChannel:%s err:%s", chanName, err)
+			log.Printf("CreateChannel:%s err:%s", chanName, err)
+			return err
 		}
 		log.Printf("CreateChannel: %s", ch.Name)
-		if _, err := api.SetChannelPurpose(ch.ID, m.Url); err != nil {
-			log.Fatalf("SetChannelPurpose %s,err:%s", ch.Name, err)
+		if ch.Purpose.Value, err = api.SetChannelPurpose(ch.ID, m.Url); err != nil {
+			log.Printf("SetChannelPurpose %s,err:%s", ch.Name, err)
+			return err
 		}
 		channels[ch.Name] = ch
 	}
@@ -277,7 +289,8 @@ func postMsg(m *Msg) {
 	}
 	if ch.Purpose.Value == "" {
 		if _, err := api.SetChannelPurpose(ch.ID, m.Url); err != nil {
-			log.Fatalf("SetChannelPurpose %s,err:%s", ch.Name, err)
+			log.Printf("SetChannelPurpose %s,err:%s", ch.Name, err)
+			return err
 		}
 	}
 	param := slack.PostMessageParameters{
@@ -289,6 +302,7 @@ func postMsg(m *Msg) {
 	}
 	log.Printf("PostMessage channel%s, User:%s", ch.Name, m.FullName)
 	//pp.Print(m)
+	return nil
 }
 
 type User struct {

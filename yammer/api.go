@@ -28,8 +28,14 @@ func (y *Yammer) EmailToIDYammer(email string) (id int, err error) {
 		return 0, in_err
 	}
 	defer r.Body.Close()
+	if r.StatusCode == 429 {
+		err = fmt.Errorf("rate limit  %v", r.Status)
+		log.Println(err)
+		return
+	}
 	if r.StatusCode != 200 {
-		log.Fatalf("updateToken %v", r.Status)
+		err = fmt.Errorf("EmailToIDYammer err: %v", r.Status)
+		log.Println(err)
 		return
 	}
 	var data interface{}
@@ -70,8 +76,15 @@ func (y *Yammer) getMessage(endpoint string, last_id, limit int) ([]byte, error)
 		return nil, in_err
 	}
 	defer r.Body.Close()
+	if r.StatusCode == 429 {
+		err := fmt.Errorf("rate limit: %v", r.Status)
+		log.Println(err)
+		return nil, err
+	}
 	if r.StatusCode != 200 {
-		log.Fatalf("updateToken %v", r.Status)
+		err := fmt.Errorf("getMessage err: %v", r.Status)
+		log.Println(err)
+		return nil, err
 	}
 	return ioutil.ReadAll(r.Body)
 }
