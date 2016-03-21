@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// The oauth package provides support for making
+//Package oauth provides support for making
 // OAuth2-authenticated HTTP requests.
 //
 // Example usage:
 //
 //	// Specify your configuration. (typically as a global variable)
 //	var config = &oauth.Config{
-//		ClientId:     YOUR_CLIENT_ID,
+//		ClientID:     YOUR_CLIENT_ID,
 //		ClientSecret: YOUR_CLIENT_SECRET,
 //		Scope:        "https://www.googleapis.com/auth/buzz",
 //		AuthURL:      "https://accounts.google.com/o/oauth2/auth",
@@ -39,6 +39,7 @@ package oauth
 
 import (
 	"encoding/json"
+	"log"
 
 	"net/http"
 	"net/url"
@@ -47,12 +48,13 @@ import (
 	"time"
 )
 
-type OAuthError struct {
+// Error struct
+type Error struct {
 	prefix string
 	msg    string
 }
 
-func (oe OAuthError) Error() string {
+func (oe Error) Error() string {
 	return "OAuthError: " + oe.prefix + ": " + oe.msg
 }
 
@@ -66,39 +68,48 @@ type Cache interface {
 // the Token is stored in JSON format.
 type CacheFile string
 
+// Token create token
 func (f CacheFile) Token() (*Token, error) {
 	file, err := os.Open(string(f))
 	if err != nil {
-		return nil, OAuthError{"CacheFile.Token", err.Error()}
+		return nil, Error{"CacheFile.Token", err.Error()}
 	}
-	defer file.Close()
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			log.Printf("Token file close err:%s", err)
+		}
+	}()
 	tok := &Token{}
 	if err := json.NewDecoder(file).Decode(tok); err != nil {
-		return nil, OAuthError{"CacheFile.Token", err.Error()}
+		return nil, Error{"CacheFile.Token", err.Error()}
 	}
 	return tok, nil
 }
 
+// PutToken  put token
 func (f CacheFile) PutToken(tok *Token) error {
 	file, err := os.OpenFile(string(f), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
-		return OAuthError{"CacheFile.PutToken", err.Error()}
+		return Error{"CacheFile.PutToken", err.Error()}
 	}
 	if err := json.NewEncoder(file).Encode(tok); err != nil {
-		file.Close()
-		return OAuthError{"CacheFile.PutToken", err.Error()}
+		if closeErr := file.Close(); closeErr != nil {
+			log.Printf("token file close err:%s", closeErr)
+		}
+		return Error{"CacheFile.PutToken", err.Error()}
 	}
 	if err := file.Close(); err != nil {
-		return OAuthError{"CacheFile.PutToken", err.Error()}
+		return Error{"CacheFile.PutToken", err.Error()}
 	}
 	return nil
 }
 
 // Config is the configuration of an OAuth consumer.
 type Config struct {
-	// ClientId is the OAuth client identifier used when communicating with
+	// ClientID is the OAuth client identifier used when communicating with
 	// the configured OAuth provider.
-	ClientId string
+	ClientID string
 
 	// ClientSecret is the OAuth client secret used when communicating with
 	// the configured OAuth provider.
@@ -143,6 +154,7 @@ type Token struct {
 	Extra        map[string]string // May be nil.
 }
 
+// Expired ...
 func (t *Token) Expired() bool {
 	if t.Expiry.IsZero() {
 		return false
@@ -185,31 +197,31 @@ func (t *Transport) transport() http.RoundTripper {
 // AuthCodeURL returns a URL that the end-user should be redirected to,
 // so that they may obtain an authorization code.
 func (c *Config) AuthCodeURL(state string) string {
-	url_, err := url.Parse(c.AuthURL)
+	authURL, err := url.Parse(c.AuthURL)
 	if err != nil {
 		panic("AuthURL malformed: " + err.Error())
 	}
 	q := url.Values{
 		"response_type":   {"code"},
-		"client_id":       {c.ClientId},
+		"client_id":       {c.ClientID},
 		"redirect_uri":    {c.RedirectURL},
 		"scope":           {c.Scope},
 		"state":           {state},
 		"access_type":     {c.AccessType},
 		"approval_prompt": {c.ApprovalPrompt},
 	}.Encode()
-	if url_.RawQuery == "" {
-		url_.RawQuery = q
+	if authURL.RawQuery == "" {
+		authURL.RawQuery = q
 	} else {
-		url_.RawQuery += "&" + q
+		authURL.RawQuery += "&" + q
 	}
-	return url_.String()
+	return authURL.String()
 }
 
 // Exchange takes a code and gets access Token from the remote server.
 func (t *Transport) Exchange(code string) (*Token, error) {
 	if t.Config == nil {
-		return nil, OAuthError{"Exchange", "no Config supplied"}
+		return nil, Error{"Exchange", "no Config supplied"}
 	}
 
 	// If the transport or the cache already has a token, it is
@@ -248,10 +260,10 @@ func (t *Transport) Exchange(code string) (*Token, error) {
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.Token == nil {
 		if t.Config == nil {
-			return nil, OAuthError{"RoundTrip", "no Config supplied"}
+			return nil, Error{"RoundTrip", "no Config supplied"}
 		}
 		if t.TokenCache == nil {
-			return nil, OAuthError{"RoundTrip", "no Token supplied"}
+			return nil, Error{"RoundTrip", "no Token supplied"}
 		}
 		var err error
 		t.Token, err = t.TokenCache.Token()
@@ -294,13 +306,13 @@ func cloneRequest(r *http.Request) *http.Request {
 // Refresh renews the Transport's AccessToken using its RefreshToken.
 func (t *Transport) Refresh() error {
 	if t.Token == nil {
-		return OAuthError{"Refresh", "no existing Token"}
+		return Error{"Refresh", "no existing Token"}
 	}
 	if t.RefreshToken == "" {
-		return OAuthError{"Refresh", "Token expired; no Refresh Token"}
+		return Error{"Refresh", "Token expired; no Refresh Token"}
 	}
 	if t.Config == nil {
-		return OAuthError{"Refresh", "no Config supplied"}
+		return Error{"Refresh", "no Config supplied"}
 	}
 
 	err := t.updateToken(t.Token, url.Values{
@@ -317,7 +329,7 @@ func (t *Transport) Refresh() error {
 }
 
 func (t *Transport) updateToken(tok *Token, v url.Values) error {
-	v.Set("client_id", t.ClientId)
+	v.Set("client_id", t.ClientID)
 	v.Set("client_secret", t.ClientSecret)
 	client := &http.Client{Transport: t.transport()}
 	req, err := http.NewRequest("POST", t.TokenURL, strings.NewReader(v.Encode()))
@@ -325,20 +337,24 @@ func (t *Transport) updateToken(tok *Token, v url.Values) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(t.ClientId, t.ClientSecret)
+	req.SetBasicAuth(t.ClientID, t.ClientSecret)
 	r, err := client.Do(req)
 	if err != nil {
 		return err
 	}
-	defer r.Body.Close()
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil {
+			log.Println(closeErr)
+		}
+	}()
 	if r.StatusCode != 200 {
-		return OAuthError{"updateToken", r.Status}
+		return Error{"updateToken", r.Status}
 	}
 	var b struct {
 		Access    string        `json:"access_token"`
 		Refresh   string        `json:"refresh_token"`
 		ExpiresIn time.Duration `json:"expires_in"`
-		Id        string        `json:"id_token"`
+		ID        string        `json:"id_token"`
 	}
 
 	var data interface{}
@@ -360,11 +376,11 @@ func (t *Transport) updateToken(tok *Token, v url.Values) error {
 	} else {
 		tok.Expiry = time.Now().Add(b.ExpiresIn)
 	}
-	if b.Id != "" {
+	if b.ID != "" {
 		if tok.Extra == nil {
 			tok.Extra = make(map[string]string)
 		}
-		tok.Extra["id_token"] = b.Id
+		tok.Extra["id_token"] = b.ID
 	}
 	return nil
 }

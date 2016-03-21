@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/masahide/ipmes2yammer/oauth"
+	"github.com/masahide/yammer2slack/oauth"
 )
 
 const (
@@ -32,7 +32,7 @@ func (y *Yammer) YammerAuth() error {
 	runtime.GOMAXPROCS(2)
 
 	y.config = &oauth.Config{
-		ClientId:     clientId,
+		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		RedirectURL:  fmt.Sprintf("%s:%d", redirectURL, y.lsConfig.Port),
 		Scope:        scope,
