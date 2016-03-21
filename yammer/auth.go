@@ -15,9 +15,9 @@ import (
 const (
 	cachefile = "cache.json"
 
-	scope             = "https://www.yammer.com/"
-	request_token_url = "https://www.yammer.com/dialog/oauth"
-	auth_token_url    = "https://www.yammer.com/oauth2/access_token.json"
+	scope           = "https://www.yammer.com/"
+	requestTokenURL = "https://www.yammer.com/dialog/oauth"
+	authToeknURL    = "https://www.yammer.com/oauth2/access_token.json"
 
 	//clientId     =
 	//clientSecret =
@@ -28,6 +28,7 @@ const (
 	//mail        =
 )
 
+// YammerAuth create struct
 func (y *Yammer) YammerAuth() error {
 	runtime.GOMAXPROCS(2)
 
@@ -36,8 +37,8 @@ func (y *Yammer) YammerAuth() error {
 		ClientSecret: clientSecret,
 		RedirectURL:  fmt.Sprintf("%s:%d", redirectURL, y.lsConfig.Port),
 		Scope:        scope,
-		AuthURL:      request_token_url,
-		TokenURL:     auth_token_url,
+		AuthURL:      requestTokenURL,
+		TokenURL:     authToeknURL,
 		TokenCache:   oauth.CacheFile(cachefile),
 	}
 

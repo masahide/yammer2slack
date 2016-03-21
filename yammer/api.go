@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -23,12 +24,12 @@ const (
 
 // EmailToIDYammer email -> yammer id
 func (y *Yammer) EmailToIDYammer(email string) (id int, err error) {
-	r, in_err := y.transport.Client().Get(byEmailURL + "?email=" + email)
-	if in_err != nil {
-		log.Fatal("Get:", in_err)
-		return 0, in_err
+	r, inErr := y.transport.Client().Get(byEmailURL + "?email=" + email)
+	if inErr != nil {
+		log.Fatal("Get:", inErr)
+		return 0, inErr
 	}
-	defer r.Body.Close()
+	defer closePrint(r.Body)
 	if r.StatusCode == 429 {
 		err = fmt.Errorf("rate limit  %v", r.Status)
 		log.Println(err)
@@ -49,41 +50,41 @@ func (y *Yammer) EmailToIDYammer(email string) (id int, err error) {
 }
 
 // GetPrivate get private messages
-func (y *Yammer) GetPrivate(last_id, limit int) ([]byte, error) {
-	return y.getMessage(privateURL, last_id, limit)
+func (y *Yammer) GetPrivate(lastID, limit int) ([]byte, error) {
+	return y.getMessage(privateURL, lastID, limit)
 }
 
 // GetInbox get inbox messages
-func (y *Yammer) GetInbox(last_id, limit int) ([]byte, error) {
-	return y.getMessage(inboxURL, last_id, limit)
+func (y *Yammer) GetInbox(lastID, limit int) ([]byte, error) {
+	return y.getMessage(inboxURL, lastID, limit)
 }
 
 // GetFollowing get Following  messages
-func (y *Yammer) GetFollowing(last_id, limit int) ([]byte, error) {
-	return y.getMessage(followingURL, last_id, limit)
+func (y *Yammer) GetFollowing(lastID, limit int) ([]byte, error) {
+	return y.getMessage(followingURL, lastID, limit)
 }
 
 // GetReceived get received  messages
-func (y *Yammer) GetReceived(last_id, limit int) ([]byte, error) {
-	return y.getMessage(receivedURL, last_id, limit)
+func (y *Yammer) GetReceived(lastID, limit int) ([]byte, error) {
+	return y.getMessage(receivedURL, lastID, limit)
 }
 
-func (y *Yammer) getMessage(endpoint string, last_id, limit int) ([]byte, error) {
+func (y *Yammer) getMessage(endpoint string, lastID, limit int) ([]byte, error) {
 	urlValues := url.Values{}
 
-	if last_id != 0 {
-		urlValues.Add("newer_than", strconv.Itoa(last_id))
+	if lastID != 0 {
+		urlValues.Add("newer_than", strconv.Itoa(lastID))
 	}
 	if limit != 0 {
 		urlValues.Add("limit", strconv.Itoa(limit))
 	}
 	//pp.Print(endpoint + "?" + urlValues.Encode())
-	r, in_err := y.transport.Client().Get(endpoint + "?" + urlValues.Encode())
-	if in_err != nil {
-		log.Fatalf("Get:%s", in_err)
-		return nil, in_err
+	r, inErr := y.transport.Client().Get(endpoint + "?" + urlValues.Encode())
+	if inErr != nil {
+		log.Fatalf("Get:%s", inErr)
+		return nil, inErr
 	}
-	defer r.Body.Close()
+	defer closePrint(r.Body)
 	if r.StatusCode == 429 {
 		err := fmt.Errorf("rate limit: %v", r.Status)
 		log.Println(err)
@@ -97,6 +98,13 @@ func (y *Yammer) getMessage(endpoint string, last_id, limit int) ([]byte, error)
 	return ioutil.ReadAll(r.Body)
 }
 
+func closePrint(c io.Closer) {
+	if err := c.Close(); err != nil {
+		log.Println(err)
+	}
+}
+
+// Send message
 func (y *Yammer) Send(method string, id int, message string) (string, error) {
 
 	r, err := y.transport.Client().PostForm(postURL, url.Values{
@@ -107,15 +115,18 @@ func (y *Yammer) Send(method string, id int, message string) (string, error) {
 		log.Fatalf("Get:%s", err)
 		return "", err
 	}
-	defer r.Body.Close()
+	defer closePrint(r.Body)
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(r.Body)
+	if _, err := buf.ReadFrom(r.Body); err != nil {
+		return buf.String(), fmt.Errorf("sendMessage err:%s", err)
+	}
 	if r.StatusCode != 200 {
 		return buf.String(), fmt.Errorf("sendMessage Code:%d, Status:%v", r.StatusCode, r.Status)
 	}
 	return buf.String(), nil
 }
 
+// Unfollow unsubscribe thread
 func (y *Yammer) Unfollow(id string) (string, error) {
 
 	req, err := http.NewRequest("DELETE", "https://www.yammer.com/api/v1/threads/"+id+"/follow.json", nil)
@@ -128,9 +139,11 @@ func (y *Yammer) Unfollow(id string) (string, error) {
 		log.Fatalf("Get:%s", err)
 		return "", err
 	}
-	defer r.Body.Close()
+	defer closePrint(r.Body)
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(r.Body)
+	if _, err := buf.ReadFrom(r.Body); err != nil {
+		return buf.String(), fmt.Errorf("Unsubscribe err:%s", err)
+	}
 	if r.StatusCode != 200 {
 		return buf.String(), fmt.Errorf("Unsubscribe Code:%d, Status:%v", r.StatusCode, r.Status)
 	}

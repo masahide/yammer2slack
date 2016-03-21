@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	lastFile  = ".lastid.json"
+	lastFile  = "lastid.json"
 	slackFile = "slack.json"
 )
 
@@ -26,7 +27,7 @@ var (
 	api       = slack.New(key)
 	channels  = map[string]*slack.Channel{}
 	key       = loadSlackKey(slackFile)
-	NameRep   = strings.NewReplacer(
+	nameRep   = strings.NewReplacer(
 		"(", "",
 		")", "",
 		".", "",
@@ -128,31 +129,37 @@ func main() {
 func getsAndSends(y *yammer.Yammer) {
 	channels = map[string]*slack.Channel{}
 	ids := loadLastid()
-	ids.ReceivedId = getAndSend(ids.ReceivedId, y.GetReceived)
-	ids.PrivateId = getAndSend(ids.PrivateId, y.GetPrivate)
+	ids.ReceivedID = getAndSend(ids.ReceivedID, y.GetReceived)
+	ids.PrivateID = getAndSend(ids.PrivateID, y.GetPrivate)
 	saveLastid(ids)
 }
 
-func getAndSend(lastId int, getMsgFunc func(int, int) ([]byte, error)) int {
-	msgJson, err := getMsgFunc(lastId, 0)
+func getAndSend(lastID int, getMsgFunc func(int, int) ([]byte, error)) int {
+	msgJSON, err := getMsgFunc(lastID, 0)
 	if err != nil {
 		log.Println(err)
-		return lastId
+		return lastID
 	}
-	messages := getMessages(msgJson)
+	messages := getMessages(msgJSON)
 	if len(messages) != 0 {
 		if err := getChannels(); err != nil {
-			return lastId
+			return lastID
 		}
 		for i := len(messages) - 1; i >= 0; i-- {
 			if err := postMsg(&messages[i]); err != nil {
-				return lastId
+				return lastID
 			}
 		}
-		lastId = messages[0].Id
+		lastID = messages[0].id
 	}
-	return lastId
+	return lastID
 
+}
+
+func printClose(c io.Closer) {
+	if err := c.Close(); err != nil {
+		log.Println(err)
+	}
 }
 
 func loadSlackKey(slackFile string) string {
@@ -161,32 +168,36 @@ func loadSlackKey(slackFile string) string {
 	if err != nil {
 		log.Fatalf("Open %s err:%s", slackFile, err)
 	}
-	defer f.Close()
-	json.NewDecoder(f).Decode(&m)
+	defer printClose(f)
+	if err = json.NewDecoder(f).Decode(&m); err != nil {
+		log.Fatalln(err)
+	}
 	k, ok := m["Key"]
 	if !ok {
 		log.Fatal("load slackFile err: not found 'Key'")
 	}
 	return k
 }
-func loadLastid() LastId {
-	l := LastId{}
+func loadLastid() LastID {
+	l := LastID{}
 	f, err := os.Open(lastFile)
 	if err != nil {
 		saveLastid(l)
 		return l
 	}
-	defer f.Close()
-	json.NewDecoder(f).Decode(&l)
+	defer printClose(f)
+	if err = json.NewDecoder(f).Decode(&l); err != nil {
+		log.Fatalln(err)
+	}
 	return l
 }
 
-func saveLastid(ids LastId) {
+func saveLastid(ids LastID) {
 	f, err := os.Create(lastFile)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
+	defer printClose(f)
 	b, err := json.Marshal(ids)
 	if err != nil {
 		log.Fatal(err)
@@ -196,54 +207,57 @@ func saveLastid(ids LastId) {
 	}
 }
 
-type LastId struct {
-	ReceivedId int
-	PrivateId  int
+// LastID save file
+type LastID struct {
+	// ReceivedID  received ID
+	ReceivedID int
+	// PrivateID  private ID
+	PrivateID int
 }
 
-func getMessages(msgJson []byte) []Msg {
-	js, err := simplejson.NewJson(msgJson)
+func getMessages(msgJSON []byte) []msg {
+	js, err := simplejson.NewJson(msgJSON)
 	if err != nil {
 		log.Println(err)
-		return []Msg{}
+		return []msg{}
 	}
 	refs := js.Get("references")
-	users := map[int]User{}
+	users := map[int]user{}
 	for i := 0; i < len(refs.MustArray()); i++ {
 		ref := refs.GetIndex(i)
 		//pp.Print(ref)
-		u := User{
-			Id:       ref.Get("id").MustInt(),
-			Name:     ref.Get("name").MustString(),
-			Email:    ref.Get("email").MustString(),
-			FullName: ref.Get("full_name").MustString(),
-			IconURL:  ref.Get("mugshot_url").MustString(),
+		u := user{
+			id:       ref.Get("id").MustInt(),
+			name:     ref.Get("name").MustString(),
+			email:    ref.Get("email").MustString(),
+			fullName: ref.Get("full_name").MustString(),
+			iconURL:  ref.Get("mugshot_url").MustString(),
 		}
-		users[u.Id] = u
+		users[u.id] = u
 	}
 	msgs := js.Get("messages")
 	lenMsg := len(msgs.MustArray())
-	messages := make([]Msg, lenMsg)
+	messages := make([]msg, lenMsg)
 	for i := 0; i < lenMsg; i++ {
-		msg := msgs.GetIndex(i)
+		resMsg := msgs.GetIndex(i)
 		//pp.Print(msg)
-		m := Msg{
-			Id:        msg.Get("id").MustInt(),
-			Body:      msg.Get("body").Get("plain").MustString(),
-			Url:       msg.Get("web_url").MustString(),
-			CreatedAt: msg.Get("created_at").MustString(),
-			ThreadId:  msg.Get("thread_id").MustInt(),
-			SenderId:  msg.Get("sender_id").MustInt(),
-			Dm:        msg.Get("direct_message").MustBool(),
-			GroupId:   msg.Get("group_id").MustInt(),
+		m := msg{
+			id:        resMsg.Get("id").MustInt(),
+			body:      resMsg.Get("body").Get("plain").MustString(),
+			url:       resMsg.Get("web_url").MustString(),
+			createdAt: resMsg.Get("created_at").MustString(),
+			threadID:  resMsg.Get("thread_id").MustInt(),
+			senderID:  resMsg.Get("sender_id").MustInt(),
+			dm:        resMsg.Get("direct_message").MustBool(),
+			groupID:   resMsg.Get("group_id").MustInt(),
 		}
-		if u, ok := users[m.SenderId]; ok {
-			m.FullName = u.FullName
-			//m.Name = u.Name
-			m.IconURL = u.IconURL
+		if u, ok := users[m.senderID]; ok {
+			m.fullName = u.fullName
+			m.name = u.name
+			m.iconURL = u.iconURL
 		}
-		if u, ok := users[m.GroupId]; ok {
-			m.GroupName = u.FullName
+		if u, ok := users[m.groupID]; ok {
+			m.groupName = u.fullName
 		}
 
 		messages[i] = m
@@ -251,25 +265,37 @@ func getMessages(msgJson []byte) []Msg {
 	return messages
 }
 
-func postMsg(m *Msg) error {
-	chanName := strconv.Itoa(m.ThreadId)
-	if m.Dm {
+func makeChannelName(m *msg) string {
+	chanName := strconv.Itoa(m.threadID)
+	if m.dm {
 		chanName = "_dm_" + chanName
 	} else {
-		chanName = m.GroupName + "_" + chanName
+		chanName = m.groupName + "_" + chanName
 	}
 	log.Println(chanName)
+	return chanName
+}
+
+func createChannel(m *msg, chanName string) (ch *slack.Channel, err error) {
+	ch, err = api.CreateChannel(chanName)
+	if err != nil {
+		log.Printf("CreateChannel:%s err:%s", chanName, err)
+		return
+	}
+	log.Printf("CreateChannel: %s", ch.Name)
+	if ch.Purpose.Value, err = api.SetChannelPurpose(ch.ID, m.url); err != nil {
+		log.Printf("SetChannelPurpose %s,err:%s", ch.Name, err)
+		return
+	}
+	return
+}
+
+func postMsg(m *msg) error {
 	var err error
+	chanName := makeChannelName(m)
 	ch, ok := channels[chanName]
 	if !ok {
-		ch, err = api.CreateChannel(chanName)
-		if err != nil {
-			log.Printf("CreateChannel:%s err:%s", chanName, err)
-			return err
-		}
-		log.Printf("CreateChannel: %s", ch.Name)
-		if ch.Purpose.Value, err = api.SetChannelPurpose(ch.ID, m.Url); err != nil {
-			log.Printf("SetChannelPurpose %s,err:%s", ch.Name, err)
+		if ch, err = createChannel(m, chanName); err != nil {
 			return err
 		}
 		channels[ch.Name] = ch
@@ -288,44 +314,44 @@ func postMsg(m *Msg) error {
 		log.Printf("JoinChannel: %s", ch.Name)
 	}
 	if ch.Purpose.Value == "" {
-		if _, err := api.SetChannelPurpose(ch.ID, m.Url); err != nil {
-			log.Printf("SetChannelPurpose %s,err:%s", ch.Name, err)
-			return err
+		if _, apierr := api.SetChannelPurpose(ch.ID, m.url); apierr != nil {
+			log.Printf("SetChannelPurpose %s,err:%s", ch.Name, apierr)
+			return apierr
 		}
 	}
 	param := slack.PostMessageParameters{
-		Username: strings.TrimSpace(NameRep.Replace(m.FullName)),
-		IconURL:  m.IconURL,
+		Username: strings.TrimSpace(nameRep.Replace(m.fullName)),
+		IconURL:  m.iconURL,
 	}
-	if _, _, err = api.PostMessage(ch.ID, m.Body, param); err != nil {
-		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, ch.ID, ch.Name, m.Body, param)
+	if _, _, err = api.PostMessage(ch.ID, m.body, param); err != nil {
+		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, ch.ID, ch.Name, m.body, param)
 	}
-	log.Printf("PostMessage channel%s, User:%s", ch.Name, m.FullName)
+	log.Printf("PostMessage channel%s, user:%s", ch.Name, m.fullName)
 	//pp.Print(m)
 	return nil
 }
 
-type User struct {
-	Id       int
-	Name     string
-	Email    string
-	FullName string //full_name
-	IconURL  string
+type user struct {
+	id       int
+	name     string
+	email    string
+	fullName string //full_name
+	iconURL  string
 }
 
 //type references
 
-type Msg struct {
-	Id        int
-	Body      string
-	Url       string
-	CreatedAt string
-	ThreadId  int
-	SenderId  int
-	FullName  string
-	Name      string
-	IconURL   string
-	Dm        bool
-	GroupId   int //group_id
-	GroupName string
+type msg struct {
+	id        int
+	body      string
+	url       string
+	createdAt string
+	threadID  int
+	senderID  int
+	fullName  string
+	name      string
+	iconURL   string
+	dm        bool
+	groupID   int //group_id
+	groupName string
 }
