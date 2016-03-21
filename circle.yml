@@ -4,7 +4,7 @@ machine:
     CHECKOUT_PATH: $HOME/$CIRCLE_PROJECT_REPONAME
   post:
     - echo "export BUILD_DATE=\"`date +%FT%T%z`\"" >> ~/.circlerc
-    - cat ~/.circlerc|sed 's/.*GITHUB_TOKEN.*//g'|sed 's/.*COVERALLS_TOKEN.*//g'
+    - cat ~/.circlerc|sed 's/.*GITHUB_TOKEN.*//g'|sed 's/.*COVERALLS_TOKEN.*//g'|sed 's/.*CLIENT_ID.*//g'|sed 's/.*CLIENT_SECRET.*//g'
 dependencies:
   pre:
     - git tag -l 
@@ -12,6 +12,9 @@ dependencies:
     #- go get github.com/mattn/goveralls
     - go get -u github.com/alecthomas/gometalinter
     - gometalinter --install
+    - cp yammer/var.go.example yammer/var.go
+    - sed -i "s/_secret_/${CLIENT_SECRET}/g"
+    - sed -i "s/_id_/${CLIENT_ID}/g"
 test:
   override:
     - go get -v -t ./...
