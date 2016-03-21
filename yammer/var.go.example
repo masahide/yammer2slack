@@ -1,6 +1,6 @@
 package yammer
 
 var (
-	clientId     = "xxxxxxxxxxxxfa"
-	clientSecret = "falsdfjaslfkjsalfkjaslfkjasldfkjalj"
+	clientID     = "_id_"
+	clientSecret = "_secret_"
 )
