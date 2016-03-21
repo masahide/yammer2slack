@@ -12,17 +12,18 @@ import (
 )
 
 const (
-	by_emailURL  = "https://www.yammer.com/api/v1/users/by_email.json" // ?email=user@domain.com
-	postURL      = "https://www.yammer.com/api/v1/messages.json"       // body replied_to_id
-	requestURL   = "https://www.yammer.com/api/v1/messages.json"
+	byEmailURL = "https://www.yammer.com/api/v1/users/by_email.json" // ?email=user@domain.com
+	postURL    = "https://www.yammer.com/api/v1/messages.json"       // body replied_to_id
+	//requestURL   = "https://www.yammer.com/api/v1/messages.json"
 	inboxURL     = "https://www.yammer.com/api/v1/messages/inbox.json" // ?newer_than=[:message_id]
 	followingURL = "https://www.yammer.com/api/v1/messages/following.json"
-	ReceivedURL  = "https://www.yammer.com/api/v1/messages/received.json"
+	receivedURL  = "https://www.yammer.com/api/v1/messages/received.json"
 	privateURL   = "https://www.yammer.com/api/v1/messages/private.json"
 )
 
+// EmailToIDYammer email -> yammer id
 func (y *Yammer) EmailToIDYammer(email string) (id int, err error) {
-	r, in_err := y.transport.Client().Get(by_emailURL + "?email=" + email)
+	r, in_err := y.transport.Client().Get(byEmailURL + "?email=" + email)
 	if in_err != nil {
 		log.Fatal("Get:", in_err)
 		return 0, in_err
@@ -47,17 +48,24 @@ func (y *Yammer) EmailToIDYammer(email string) (id int, err error) {
 	return
 }
 
+// GetPrivate get private messages
 func (y *Yammer) GetPrivate(last_id, limit int) ([]byte, error) {
 	return y.getMessage(privateURL, last_id, limit)
 }
+
+// GetInbox get inbox messages
 func (y *Yammer) GetInbox(last_id, limit int) ([]byte, error) {
 	return y.getMessage(inboxURL, last_id, limit)
 }
+
+// GetFollowing get Following  messages
 func (y *Yammer) GetFollowing(last_id, limit int) ([]byte, error) {
 	return y.getMessage(followingURL, last_id, limit)
 }
+
+// GetReceived get received  messages
 func (y *Yammer) GetReceived(last_id, limit int) ([]byte, error) {
-	return y.getMessage(ReceivedURL, last_id, limit)
+	return y.getMessage(receivedURL, last_id, limit)
 }
 
 func (y *Yammer) getMessage(endpoint string, last_id, limit int) ([]byte, error) {

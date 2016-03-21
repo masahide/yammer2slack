@@ -1,7 +1,7 @@
 package yammer
 
 import (
-	"github.com/masahide/ipmes2yammer/oauth"
+	"github.com/masahide/yammer2slack/oauth"
 )
 
 type Yammer struct {
