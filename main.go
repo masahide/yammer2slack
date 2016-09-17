@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"io"
@@ -265,12 +267,22 @@ func getMessages(msgJSON []byte) []msg {
 	return messages
 }
 
+func nameHash(name string) string {
+	if len(name) < 21 {
+		return name
+	}
+	hasher := md5.New()
+	hasher.Write([]byte(name))
+	h := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
+	return name[0:15] + h[0:6]
+}
+
 func makeChannelName(m *msg) string {
 	chanName := strconv.Itoa(m.threadID)
 	if m.dm {
 		chanName = "_dm_" + chanName
 	} else {
-		chanName = m.groupName + "_" + chanName
+		chanName = nameHash(m.groupName + "_" + chanName)
 	}
 	log.Println(chanName)
 	return chanName
