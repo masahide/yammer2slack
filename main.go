@@ -274,7 +274,7 @@ func nameHash(name string) string {
 	hasher := md5.New()
 	hasher.Write([]byte(name))
 	h := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
-	return name[0:15] + h[0:6]
+	return name[0:15] + strings.ToLower(h[0:6])
 }
 
 func makeChannelName(m *msg) string {
