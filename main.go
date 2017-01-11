@@ -133,6 +133,8 @@ func getsAndSends(y *yammer.Yammer) {
 	ids := loadLastid()
 	ids.ReceivedID = getAndSend(ids.ReceivedID, y.GetReceived)
 	ids.PrivateID = getAndSend(ids.PrivateID, y.GetPrivate)
+	//ids.InboxID = getAndSend(ids.InboxID, y.GetInbox)
+	//ids.FollowingID = getAndSend(ids.FollowingID, y.GetFollowing)
 	saveLastid(ids)
 }
 
@@ -215,6 +217,10 @@ type LastID struct {
 	ReceivedID int
 	// PrivateID  private ID
 	PrivateID int
+	// InboxID  inbox ID
+	InboxID int
+	// FollowingID  inbox ID
+	FollowingID int
 }
 
 func getMessages(msgJSON []byte) []msg {
@@ -274,7 +280,8 @@ func nameHash(name string) string {
 	hasher := md5.New()
 	hasher.Write([]byte(name))
 	h := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
-	return name[0:15] + strings.ToLower(h[0:6])
+
+	return nameRep.Replace(name[0:15] + h[0:6])
 }
 
 func makeChannelName(m *msg) string {
@@ -284,6 +291,7 @@ func makeChannelName(m *msg) string {
 	} else {
 		chanName = nameHash(m.groupName + "_" + chanName)
 	}
+	chanName = strings.ToLower(chanName)
 	log.Println(chanName)
 	return chanName
 }
@@ -304,6 +312,9 @@ func createChannel(m *msg, chanName string) (ch *slack.Channel, err error) {
 
 func postMsg(m *msg) error {
 	var err error
+	if len(m.body) <= 0 {
+		return nil
+	}
 	chanName := makeChannelName(m)
 	ch, ok := channels[chanName]
 	if !ok {
