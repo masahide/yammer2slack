@@ -1,6 +1,0 @@
-package yammer
-
-var (
-	clientID     = "_id_"
-	clientSecret = "_secret_"
-)
