@@ -10,8 +10,8 @@ dependencies:
     - git tag -l 
     #- go get github.com/axw/gocov/gocov
     #- go get github.com/mattn/goveralls
-    - go get -u github.com/alecthomas/gometalinter
-    - gometalinter --install
+    #- go get -u github.com/alecthomas/gometalinter
+    #- gometalinter --install
     - cp yammer/var.go.example yammer/var.go
     - sed -i "s/_secret_/${CLIENT_SECRET}/g" yammer/var.go
     - sed -i "s/_id_/${CLIENT_ID}/g" yammer/var.go
@@ -19,7 +19,7 @@ test:
   override:
     - go get -v -t ./...
     - test -z "$(gofmt -s -l . | tee /dev/stderr)"
-    - gometalinter --deadline 30s ./...
+    #- gometalinter --deadline 60s ./...
     - go test -race -test.v ./...
     #- goveralls -v -service=circle-ci -repotoken $COVERALLS_TOKEN ./yammer
 deployment:
@@ -28,5 +28,6 @@ deployment:
      commands:
      - go get github.com/mitchellh/gox
      - go get github.com/tcnksm/ghr
-     - gox --osarch "linux/amd64 darwin/amd64" -ldflags "-X main.Version=$(git describe --always --dirty) -X main.Date=$BUILD_DATE" -output "dist/${CIRCLE_PROJECT_REPONAME}_{{.OS}}_{{.Arch}}"
-     - ghr -t $GITHUB_TOKEN -u $CIRCLE_PROJECT_USERNAME -r $CIRCLE_PROJECT_REPONAME --replace `git describe --tags` dist/
+     - gox --osarch "linux/386 linux/amd64 darwin/386 darwin/amd64" -ldflags "-X main.Version=$(git describe --always --dirty) -X main.Date=${BUILD_DATE}" -output "dist/{{.OS}}_{{.Arch}}/${CIRCLE_PROJECT_REPONAME}"
+     - cd dist;for i in $(ls);do tar -cvzf "${CIRCLE_PROJECT_REPONAME}_${i}.tar.gz" "${i}";rm -rf "${i}";done
+     - ghr -t "${GITHUB_TOKEN}" -u "${CIRCLE_PROJECT_USERNAME}" -r "${CIRCLE_PROJECT_REPONAME}" --replace `git describe --tags` dist/ 

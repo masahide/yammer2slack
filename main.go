@@ -127,7 +127,7 @@ func mainLoop() {
 		select {
 		case m, ok := <-messageChan:
 			if !ok {
-				break
+				return
 			}
 			if m.Channel == "/meta/connect" {
 				continue
