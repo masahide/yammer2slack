@@ -8,17 +8,11 @@ machine:
 dependencies:
   pre:
     - git tag -l 
-    #- go get github.com/axw/gocov/gocov
-    #- go get github.com/mattn/goveralls
-    #- go get -u github.com/alecthomas/gometalinter
-    #- gometalinter --install
 test:
   override:
     - go get -v -t ./...
     - test -z "$(gofmt -s -l . | tee /dev/stderr)"
-    #- gometalinter --deadline 60s ./...
     - go test -race -test.v ./...
-    #- goveralls -v -service=circle-ci -repotoken $COVERALLS_TOKEN ./yammer
 deployment:
   release:
      tag: /v.*/
