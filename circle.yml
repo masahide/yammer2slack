@@ -12,9 +12,6 @@ dependencies:
     #- go get github.com/mattn/goveralls
     #- go get -u github.com/alecthomas/gometalinter
     #- gometalinter --install
-    - cp yammer/var.go.example yammer/var.go
-    - sed -i "s/_secret_/${CLIENT_SECRET}/g" yammer/var.go
-    - sed -i "s/_id_/${CLIENT_ID}/g" yammer/var.go
 test:
   override:
     - go get -v -t ./...
