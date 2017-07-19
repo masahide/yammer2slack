@@ -232,6 +232,22 @@ type Conf struct {
 	InboxID int
 }
 
+func nameHash(name string,size ,hsize int) string {
+	if len(name) < size {
+		return name
+	}
+	hasher := md5.New()
+	hasher.Write([]byte(name))
+	h := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
+	if len(h) > hsize {
+		log.Faitalf("len(hash)>hsize,name:%s,hsize:%s,hash:%s",name,hsize ,h)
+	}
+	if hsize > size {
+		return h[0:hsize]
+	}
+	return nameRep.Replace(name[0:size-hsize] + h[0:hsize])
+}
+/*
 func nameHash(name string) string {
 	if len(name) < 21 {
 		return name
@@ -242,6 +258,7 @@ func nameHash(name string) string {
 
 	return nameRep.Replace(name[0:15] + h[0:6])
 }
+*/
 
 func getRef(id int, refs []*schema.Reference) schema.Reference {
 	for _, r := range refs {
@@ -259,7 +276,7 @@ func makeChannelName(m schema.Message, refs []*schema.Reference) string {
 	if m.DirectMessage {
 		chanName = "_dm_" + chanName
 	} else {
-		chanName = nameHash(getGroupName(m, refs) + "_" + chanName)
+		chanName = nameHash(getGroupName(m, refs) + "_" + chanName,21,6)
 	}
 	chanName = strings.ToLower(chanName)
 	log.Println(chanName)
@@ -302,6 +319,7 @@ func getThreadID(m schema.Message, refs []*schema.Reference) (string, error) {
 	if err != nil{
 		return "",err
 	}
+	
 	ch ,err := createChannel(
 	if err != nil{
 		return "",err
