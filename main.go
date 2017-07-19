@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -18,16 +19,18 @@ import (
 )
 
 const (
-	yammerFile = "yammer.json"
-	slackFile  = "slack.json"
+	yammerFile    = "yammer.json"
+	slackFile     = "slack.json"
+	threadMapFile = "threadmap.json"
 )
 
 var (
-	conf     Conf
-	api      = slack.New(key)
-	channels = map[string]*slack.Channel{}
-	key      = loadSlackKey(slackFile)
-	nameRep  = strings.NewReplacer(
+	conf      Conf
+	api       = slack.New(key)
+	channels  = map[string]*slack.Channel{}
+	threadMap = loadThreadMap(threadMapFile) // map[thread_id]slack_ts
+	key       = loadSlackKey(slackFile)
+	nameRep   = strings.NewReplacer(
 		"(", "",
 		")", "",
 		".", "",
@@ -142,7 +145,7 @@ func mainLoop() {
 			}
 			receiveMessage(m.Data.Feed)
 		}
-		saveConf(conf, yammerFile)
+		saveJSON(conf, yammerFile)
 	}
 }
 
@@ -183,7 +186,7 @@ func loadConf(file string) Conf {
 	l := Conf{}
 	f, err := os.Open(file)
 	if err != nil {
-		saveConf(l, yammerFile)
+		saveJSON(l, yammerFile)
 		return l
 	}
 	defer printClose(f)
@@ -192,14 +195,27 @@ func loadConf(file string) Conf {
 	}
 	return l
 }
-
-func saveConf(conf Conf, file string) {
+func loadThreadMap(filename string) map[int]string {
+	m := map[int]string{}
+	f, err := os.Open(filename)
+	if err != nil {
+		saveJSON(m, threadMapFile)
+		return m
+	}
+	defer printClose(f)
+	if err = json.NewDecoder(f).Decode(&m); err != nil {
+		log.Fatalln(err)
+	}
+	return m
+}
+func saveJSON(conf interface{}, file string) {
 	f, err := os.Create(file)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer printClose(f)
-	b, err := json.Marshal(conf)
+	//b, err := json.Marshal(conf)
+	b, err := json.MarshalIndent(conf, "", "  ")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -264,6 +280,35 @@ func createChannel(m schema.Message, chanName string) (ch *slack.Channel, err er
 	return
 }
 
+// get Thread Parent message
+func getParentRef(threadID int) (schema.Reference, error) {
+	feed, err := yClient.ThreadFeed(threadID)
+	if err != nil {
+		return schema.Reference{}, err
+	}
+	for _, r := range feed.References {
+		if r.Type == "message" && r.RepliedToId == 0 {
+			return *r, nil
+		}
+	}
+	return schema.Reference{}, fmt.Errorf("Can not find my parent's message. ThreadID:%d", threadID)
+}
+func getThreadID(m schema.Message, refs []*schema.Reference) (string, error) {
+	ts, ok := threadMap[m.ThreadId]
+	if ok {
+		return ts, nil
+	}
+	ref, err := getParentRef(feed.Reference)
+	if err != nil{
+		return "",err
+	}
+	ch ,err := createChannel(
+	if err != nil{
+		return "",err
+	}
+
+	return "", nil
+}
 func postMsg(m schema.Message, refs []*schema.Reference) error {
 	//func postMsg(m *msg) error {
 	var err error
