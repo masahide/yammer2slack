@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -19,18 +20,18 @@ import (
 )
 
 const (
-	yammerFile    = "yammer.json"
-	slackFile     = "slack.json"
-	threadMapFile = "threadmap.json"
+	yammerFile = "yammer.json"
+	//slackFile     = "slack.json"
+	cacheFile         = "cache.json"
+	networkNameMaxLen = 10
 )
 
 var (
-	conf      Conf
-	api       = slack.New(key)
-	channels  = map[string]*slack.Channel{}
-	threadMap = loadThreadMap(threadMapFile) // map[thread_id]slack_ts
-	key       = loadSlackKey(slackFile)
-	nameRep   = strings.NewReplacer(
+	conf     Conf
+	channels = map[string]*slack.Channel{}
+	cache    = loadCache(cacheFile) // map[thread_id]slack_ts
+	nameRep  = strings.NewReplacer(
+		" ", "",
 		"(", "",
 		")", "",
 		".", "",
@@ -61,22 +62,26 @@ var (
 	)
 	debug   bool
 	yClient *yammer.Client
+	sClient *slack.Client
 	current *schema.User
 )
 
 func init() {
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.BoolVar(&debug, "debug", debug, "debug mode")
 	flag.Parse()
 	conf = loadConf(yammerFile)
-	yClient = yammer.New(conf.AccessToken)
+	conf.networkNameRe = regexp.MustCompile(conf.NetworkNameFilter)
+	yClient = yammer.New(conf.YammerAccessToken)
 	yClient.DebugMode = debug
+	sClient = slack.New(conf.SlackToken)
 }
 func getChannels() error {
 	if len(channels) != 0 {
 		return nil
 	}
-	chs, err := api.GetChannels(false)
+	chs, err := sClient.GetChannels(false)
 	if err != nil {
 		log.Println(err)
 		return err
@@ -145,7 +150,7 @@ func mainLoop() {
 			}
 			receiveMessage(m.Data.Feed)
 		}
-		saveJSON(conf, yammerFile)
+		//saveJSON(conf, yammerFile)
 	}
 }
 
@@ -156,7 +161,7 @@ func receiveMessage(feed *schema.MessageFeed) {
 			log.Print(err)
 			return
 		}
-		conf.InboxID = mes.Id
+		//conf.InboxID = mes.Id
 	}
 }
 
@@ -166,6 +171,7 @@ func printClose(c io.Closer) {
 	}
 }
 
+/*
 func loadSlackKey(slackFile string) string {
 	m := map[string]string{}
 	f, err := os.Open(slackFile)
@@ -182,6 +188,7 @@ func loadSlackKey(slackFile string) string {
 	}
 	return k
 }
+*/
 func loadConf(file string) Conf {
 	l := Conf{}
 	f, err := os.Open(file)
@@ -195,18 +202,18 @@ func loadConf(file string) Conf {
 	}
 	return l
 }
-func loadThreadMap(filename string) map[int]string {
-	m := map[int]string{}
+func loadCache(filename string) Cache {
+	var c Cache
 	f, err := os.Open(filename)
 	if err != nil {
-		saveJSON(m, threadMapFile)
-		return m
+		saveJSON(c, filename)
+		return c
 	}
 	defer printClose(f)
-	if err = json.NewDecoder(f).Decode(&m); err != nil {
+	if err = json.NewDecoder(f).Decode(&c); err != nil {
 		log.Fatalln(err)
 	}
-	return m
+	return c
 }
 func saveJSON(conf interface{}, file string) {
 	f, err := os.Create(file)
@@ -224,15 +231,29 @@ func saveJSON(conf interface{}, file string) {
 	}
 }
 
-// Conf save file
-type Conf struct {
-	// AccessToken  yammer access token
-	AccessToken string
-	// InboxID  inbox ID
-	InboxID int
+func nameShorter(name string, size int) string {
+	res := strings.TrimSpace(conf.networkNameRe.ReplaceAllString(name, ""))
+	res = nameRep.Replace(res)
+	return nameHash(res, size, 3)
 }
 
-func nameHash(name string,size ,hsize int) string {
+// Conf save file
+type Conf struct {
+	YammerAccessToken string
+	SlackToken        string
+	NetworkNameFilter string
+
+	networkNameRe *regexp.Regexp
+}
+
+// Cache save file
+type Cache struct {
+	Networks  []schema.Network
+	threadMap map[int]string // map[thread_id]slack_ts
+}
+
+func nameHash(name string, size, hsize int) string {
+	name = nameRep.Replace(name)
 	if len(name) < size {
 		return name
 	}
@@ -240,13 +261,14 @@ func nameHash(name string,size ,hsize int) string {
 	hasher.Write([]byte(name))
 	h := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
 	if len(h) > hsize {
-		log.Faitalf("len(hash)>hsize,name:%s,hsize:%s,hash:%s",name,hsize ,h)
+		log.Fatalf("len(hash)>hsize,name:%s,hsize:%s,hash:%s", name, hsize, h)
 	}
 	if hsize > size {
-		return h[0:hsize]
+		return nameRep.Replace(h[0:hsize])
 	}
 	return nameRep.Replace(name[0:size-hsize] + h[0:hsize])
 }
+
 /*
 func nameHash(name string) string {
 	if len(name) < 21 {
@@ -276,7 +298,7 @@ func makeChannelName(m schema.Message, refs []*schema.Reference) string {
 	if m.DirectMessage {
 		chanName = "_dm_" + chanName
 	} else {
-		chanName = nameHash(getGroupName(m, refs) + "_" + chanName,21,6)
+		chanName = nameHash(getGroupName(m, refs)+"_"+chanName, 21, 6)
 	}
 	chanName = strings.ToLower(chanName)
 	log.Println(chanName)
@@ -284,13 +306,13 @@ func makeChannelName(m schema.Message, refs []*schema.Reference) string {
 }
 
 func createChannel(m schema.Message, chanName string) (ch *slack.Channel, err error) {
-	ch, err = api.CreateChannel(chanName)
+	ch, err = sClient.CreateChannel(chanName)
 	if err != nil {
 		log.Printf("CreateChannel:%s err:%s", chanName, err)
 		return
 	}
 	log.Printf("CreateChannel: %s", ch.Name)
-	if ch.Purpose.Value, err = api.SetChannelPurpose(ch.ID, m.WebURL); err != nil {
+	if ch.Purpose.Value, err = sClient.SetChannelPurpose(ch.ID, m.WebURL); err != nil {
 		log.Printf("SetChannelPurpose %s,err:%s", ch.Name, err)
 		return
 	}
@@ -310,19 +332,42 @@ func getParentRef(threadID int) (schema.Reference, error) {
 	}
 	return schema.Reference{}, fmt.Errorf("Can not find my parent's message. ThreadID:%d", threadID)
 }
-func getThreadID(m schema.Message, refs []*schema.Reference) (string, error) {
-	ts, ok := threadMap[m.ThreadId]
+
+func getNetwork(id int) schema.Network {
+	for _, n := range cache.Networks {
+		if n.ID == id {
+			return n
+		}
+	}
+	var err error
+	cache.Networks, err = yClient.GetNetworks(yammer.GetNetworksOptions{})
+	if err != nil {
+		log.Fatalf("GetNetworks err: %s", err)
+	}
+	for _, n := range cache.Networks {
+		if n.ID == id {
+			return n
+		}
+	}
+	log.Fatalf("not found network id: %d", id)
+	return schema.Network{}
+
+}
+func getTS(m schema.Message, refs []*schema.Reference) (string, error) {
+	ts, ok := cache.threadMap[m.ThreadId]
 	if ok {
 		return ts, nil
 	}
-	ref, err := getParentRef(feed.Reference)
-	if err != nil{
-		return "",err
+	ref, err := getParentRef(m.ThreadId)
+	if err != nil {
+		return "", err
 	}
-	
-	ch ,err := createChannel(
-	if err != nil{
-		return "",err
+
+	network := getNetwork(ref.NetworkId)
+
+	ch, err := createChannel(m, network.Name)
+	if err != nil {
+		return "", err
 	}
 
 	return "", nil
@@ -342,20 +387,20 @@ func postMsg(m schema.Message, refs []*schema.Reference) error {
 		channels[ch.Name] = ch
 	}
 	if ch.IsArchived {
-		if err = api.UnarchiveChannel(ch.ID); err != nil {
+		if err = sClient.UnarchiveChannel(ch.ID); err != nil {
 			log.Printf("UnarchiveChannel:%s err %s", ch.Name, err)
 		}
 		log.Printf("UnarchiveChannel: %s", ch.Name)
 	}
 	if !ch.IsMember {
-		if ch, err = api.JoinChannel(ch.Name); err != nil {
+		if ch, err = sClient.JoinChannel(ch.Name); err != nil {
 			log.Printf("JoinChannel %s: %s", ch.Name, err)
 		}
 		channels[ch.Name] = ch
 		log.Printf("JoinChannel: %s", ch.Name)
 	}
 	if ch.Purpose.Value == "" {
-		if _, apierr := api.SetChannelPurpose(ch.ID, m.WebURL); apierr != nil {
+		if _, apierr := sClient.SetChannelPurpose(ch.ID, m.WebURL); apierr != nil {
 			log.Printf("SetChannelPurpose %s,err:%s", ch.Name, apierr)
 			return apierr
 		}
@@ -365,7 +410,7 @@ func postMsg(m schema.Message, refs []*schema.Reference) error {
 		Username: strings.TrimSpace(nameRep.Replace(sender.FullName)),
 		IconURL:  sender.MugshotURL,
 	}
-	if _, _, err = api.PostMessage(ch.ID, m.Body.Plain, param); err != nil {
+	if _, _, err = sClient.PostMessage(ch.ID, m.Body.Plain, param); err != nil {
 		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, ch.ID, ch.Name, m.Body.Plain, param)
 	}
 	log.Printf("PostMessage channel%s, user:%s", ch.Name, sender.FullName)
