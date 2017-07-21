@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/k0kubun/pp"
 	"github.com/masahide/go-yammer/cometd"
 	"github.com/masahide/go-yammer/schema"
 	"github.com/masahide/go-yammer/yammer"
@@ -21,6 +22,7 @@ import (
 
 const (
 	yammerFile = "yammer.json"
+	confFile   = "yammer2slack.json"
 	//slackFile     = "slack.json"
 	cacheFile         = "cache.json"
 	networkNameMaxLen = 10
@@ -71,7 +73,7 @@ func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.BoolVar(&debug, "debug", debug, "debug mode")
 	flag.Parse()
-	conf = loadConf(yammerFile)
+	conf = loadConf(confFile)
 	conf.networkNameRe = regexp.MustCompile(conf.NetworkNameFilter)
 	yClient = yammer.New(conf.YammerAccessToken)
 	yClient.DebugMode = debug
@@ -148,7 +150,8 @@ func mainLoop() {
 				log.Printf("Data.Feed is nil. channel:%#v", m)
 				continue
 			}
-			receiveMessage(m.Data.Feed)
+			//receiveMessage(m.Data.Feed)
+			pp.Print(m)
 		}
 		//saveJSON(conf, yammerFile)
 	}
@@ -190,17 +193,17 @@ func loadSlackKey(slackFile string) string {
 }
 */
 func loadConf(file string) Conf {
-	l := Conf{}
+	c := Conf{}
 	f, err := os.Open(file)
 	if err != nil {
-		saveJSON(l, yammerFile)
-		return l
+		saveJSON(c, file)
+		return c
 	}
 	defer printClose(f)
-	if err = json.NewDecoder(f).Decode(&l); err != nil {
+	if err = json.NewDecoder(f).Decode(&c); err != nil {
 		log.Fatalln(err)
 	}
-	return l
+	return c
 }
 func loadCache(filename string) Cache {
 	var c Cache
@@ -365,7 +368,8 @@ func getTS(m schema.Message, refs []*schema.Reference) (string, error) {
 
 	network := getNetwork(ref.NetworkId)
 
-	ch, err := createChannel(m, network.Name)
+	_, err = createChannel(m, network.Name)
+	//	ch, err := createChannel(m, network.Name)
 	if err != nil {
 		return "", err
 	}
