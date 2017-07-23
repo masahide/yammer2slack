@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/k0kubun/pp"
 	"github.com/masahide/go-yammer/cometd"
 	"github.com/masahide/go-yammer/schema"
 	"github.com/masahide/go-yammer/yammer"
@@ -29,6 +28,7 @@ type Conf struct {
 	networkNameRe *regexp.Regexp
 }
 
+// Thread channel info
 type Thread struct {
 	ChannelID   string
 	ChannelName string
@@ -38,7 +38,7 @@ type Thread struct {
 // Cache save file
 type Cache struct {
 	Networks  []schema.Network
-	threadMap map[int]Thread // map[thread_id]Thread
+	ThreadMap map[int]Thread // map[thread_id]Thread
 }
 
 const (
@@ -81,6 +81,8 @@ var (
 		",", "",
 		"|", "",
 		"`", "",
+		"-", "",
+		"_", "",
 		"\"", "",
 	)
 	debug   bool
@@ -171,8 +173,7 @@ func mainLoop() {
 				log.Printf("Data.Feed is nil. channel:%#v", m)
 				continue
 			}
-			//receiveMessage(m.Data.Feed)
-			pp.Print(m)
+			receiveMessage(m.Data.Feed)
 		}
 		//saveJSON(conf, yammerFile)
 	}
@@ -227,7 +228,10 @@ func loadConf(file string) Conf {
 	return c
 }
 func loadCache(filename string) Cache {
-	var c Cache
+	c := Cache{
+		Networks:  []schema.Network{},
+		ThreadMap: map[int]Thread{},
+	}
 	f, err := os.Open(filename)
 	if err != nil {
 		saveJSON(c, filename)
@@ -264,15 +268,15 @@ func nameShorter(name string, size int) string {
 }
 
 func nameHash(name string, size, hsize int) string {
-	name = nameRep.Replace(name)
+	name = strings.ToLower(nameRep.Replace(name))
 	if len(name) < size {
 		return name
 	}
 	hasher := md5.New()
 	hasher.Write([]byte(name))
 	h := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
-	if len(h) > hsize {
-		log.Fatalf("len(hash)>hsize,name:%s,hsize:%s,hash:%s", name, hsize, h)
+	if len(h) < hsize {
+		log.Fatalf("len(hash)>hsize,name:%s,hsize:%d,hash:%s", name, hsize, h)
 	}
 	if hsize > size {
 		return nameRep.Replace(h[0:hsize])
@@ -311,16 +315,33 @@ func makeChannelName(m schema.Message, refs []*schema.Reference) string {
 	} else {
 		chanName = nameHash(getGroupName(m, refs)+"_"+chanName, 21, 6)
 	}
-	chanName = strings.ToLower(chanName)
 	log.Println(chanName)
 	return chanName
+}
+
+func findChannelID(chName string) string {
+	chName = strings.ToLower(chName)
+	chs, err := sClient.GetChannels(true)
+	if err != nil {
+		log.Printf("GetChannels(%s) err:%s", chName, err)
+		return ""
+	}
+	for _, ch := range chs {
+		if ch.Name == chName {
+			return ch.ID
+		}
+	}
+	return ""
 }
 
 func createChannel(m schema.Message, chanName string) (ch *slack.Channel, err error) {
 	ch, err = sClient.CreateChannel(chanName)
 	if err != nil {
-		log.Printf("CreateChannel:%s err:%s", chanName, err)
-		return
+		log.Printf("CreateChannel(%s) err:%s", chanName, err)
+		ch, err = sClient.GetChannelInfo(findChannelID(chanName))
+		if err != nil {
+			log.Printf("GetChannelInfo:%s err:%s", chanName, err)
+		}
 	}
 	log.Printf("CreateChannel: %s", ch.Name)
 	if ch.Purpose.Value, err = sClient.SetChannelPurpose(ch.ID, m.WebURL); err != nil {
@@ -365,7 +386,7 @@ func getNetwork(id int) schema.Network {
 
 }
 func getTS(m schema.Message, refs []*schema.Reference) (Thread, error) {
-	thread, ok := cache.threadMap[m.ThreadId]
+	thread, ok := cache.ThreadMap[m.ThreadId]
 	if ok {
 		return thread, nil
 	}
@@ -394,16 +415,18 @@ func getTS(m schema.Message, refs []*schema.Reference) (Thread, error) {
 	}
 	thread.ChannelID = ch.ID
 	body := yammerParentFeed.Body.Plain + "\nsee: " + yammerParentFeed.WebURL
+	log.Printf("PostMessage channel:%s(%s), body:%s, param:%#v", ch.ID, ch.Name, yammerParentFeed.Body.Plain, param)
 	if _, thread.TS, err = sClient.PostMessage(ch.ID, body, param); err != nil {
 		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, ch.ID, ch.Name, yammerParentFeed.Body.Plain, param)
 	}
-	cache.threadMap[m.ThreadId] = thread
+	cache.ThreadMap[m.ThreadId] = thread
 	chJoin(thread, yammerParentFeed)
 	saveJSON(cache, cacheFile)
 	return thread, nil
 }
 func chJoin(thread Thread, parent schema.Reference) error {
 	ch, err := sClient.GetChannelInfo(thread.ChannelID)
+	log.Printf("GetChannelInfo(%s): [%# v]", thread.ChannelID, ch)
 	if err != nil {
 		return err
 	}
@@ -447,7 +470,6 @@ func postMsg(m schema.Message, refs []*schema.Reference) error {
 	if _, _, err = sClient.PostMessage(thread.ChannelID, m.Body.Plain, param); err != nil {
 		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, thread.ChannelID, thread.ChannelName, m.Body.Plain, param)
 	}
-	log.Printf("PostMessage channel%s, user:%s", thread.ChannelName, sender.FullName)
-	//pp.Print(m)
+	log.Printf("PostMessage channel:%s, user:%s", thread.ChannelName, sender.FullName)
 	return nil
 }
