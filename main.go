@@ -19,6 +19,27 @@ import (
 	"github.com/nlopes/slack"
 )
 
+// Conf save file
+type Conf struct {
+	YammerAccessToken string
+	SlackToken        string
+	NetworkNameFilter string
+
+	networkNameRe *regexp.Regexp
+}
+
+type Thread struct {
+	ChannelID   string
+	ChannelName string
+	TS          string
+}
+
+// Cache save file
+type Cache struct {
+	Networks  []schema.Network
+	threadMap map[int]Thread // map[thread_id]Thread
+}
+
 const (
 	yammerFile = "yammer.json"
 	//slackFile     = "slack.json"
@@ -231,25 +252,12 @@ func saveJSON(conf interface{}, file string) {
 	}
 }
 
+func netWorkNameShorter(name string, size int) string {
+	return nameShorter(strings.TrimSpace(conf.networkNameRe.ReplaceAllString(name, "")), size)
+}
+
 func nameShorter(name string, size int) string {
-	res := strings.TrimSpace(conf.networkNameRe.ReplaceAllString(name, ""))
-	res = nameRep.Replace(res)
-	return nameHash(res, size, 3)
-}
-
-// Conf save file
-type Conf struct {
-	YammerAccessToken string
-	SlackToken        string
-	NetworkNameFilter string
-
-	networkNameRe *regexp.Regexp
-}
-
-// Cache save file
-type Cache struct {
-	Networks  []schema.Network
-	threadMap map[int]string // map[thread_id]slack_ts
+	return nameHash(nameRep.Replace(name), size, 3)
 }
 
 func nameHash(name string, size, hsize int) string {
@@ -353,38 +361,48 @@ func getNetwork(id int) schema.Network {
 	return schema.Network{}
 
 }
-func getTS(m schema.Message, refs []*schema.Reference) (string, error) {
-	ts, ok := cache.threadMap[m.ThreadId]
+func getTS(m schema.Message, refs []*schema.Reference) (Thread, error) {
+	thread, ok := cache.threadMap[m.ThreadId]
 	if ok {
-		return ts, nil
+		return thread, nil
 	}
-	ref, err := getParentRef(m.ThreadId)
+	yammerParentFeed, err := getParentRef(m.ThreadId)
 	if err != nil {
-		return "", err
+		return Thread{}, err
 	}
 
-	network := getNetwork(ref.NetworkId)
+	network := getNetwork(yammerParentFeed.NetworkId)
+	var groupName string
+	if m.DirectMessage {
+		groupName = "dm"
+	} else {
+		groupName = getGroupName(m, refs)
+	}
 
-	ch, err := createChannel(m, network.Name)
+	thread.ChannelName = netWorkNameShorter(network.Name, 10) + "-" + nameShorter(groupName, 10)
+	ch, err := createChannel(m, thread.ChannelName)
 	if err != nil {
-		return "", err
+		return thread, err
 	}
-
-	return "", nil
+	sender := getRef(yammerParentFeed.SenderId, refs)
+	param := slack.PostMessageParameters{
+		Username: strings.TrimSpace(nameRep.Replace(sender.FullName)),
+		IconURL:  sender.MugshotURL,
+	}
+	thread.ChannelID = ch.ID
+	body := yammerParentFeed.Body.Plain + "\nsee: " + yammerParentFeed.WebURL
+	if _, thread.TS, err = sClient.PostMessage(ch.ID, body, param); err != nil {
+		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, ch.ID, ch.Name, yammerParentFeed.Body.Plain, param)
+	}
+	cache.threadMap[m.ThreadId] = thread
+	chJoin(thread, yammerParentFeed)
+	saveJSON(cache, cacheFile)
+	return thread, nil
 }
-func postMsg(m schema.Message, refs []*schema.Reference) error {
-	//func postMsg(m *msg) error {
-	var err error
-	if len(m.Body.Plain) <= 0 {
-		return nil
-	}
-	chanName := makeChannelName(m, refs)
-	ch, ok := channels[chanName]
-	if !ok {
-		if ch, err = createChannel(m, chanName); err != nil {
-			return err
-		}
-		channels[ch.Name] = ch
+func chJoin(thread Thread, parent schema.Reference) error {
+	ch, err := sClient.GetChannelInfo(thread.ChannelID)
+	if err != nil {
+		return err
 	}
 	if ch.IsArchived {
 		if err = sClient.UnarchiveChannel(ch.ID); err != nil {
@@ -400,20 +418,33 @@ func postMsg(m schema.Message, refs []*schema.Reference) error {
 		log.Printf("JoinChannel: %s", ch.Name)
 	}
 	if ch.Purpose.Value == "" {
-		if _, apierr := sClient.SetChannelPurpose(ch.ID, m.WebURL); apierr != nil {
+		if _, apierr := sClient.SetChannelPurpose(ch.ID, parent.WebURL); apierr != nil {
 			log.Printf("SetChannelPurpose %s,err:%s", ch.Name, apierr)
 			return apierr
 		}
 	}
+	return nil
+}
+func postMsg(m schema.Message, refs []*schema.Reference) error {
+	//func postMsg(m *msg) error {
+	var err error
+	if len(m.Body.Plain) <= 0 {
+		return nil
+	}
+	thread, err := getTS(m, refs)
+	if err != nil {
+		return err
+	}
 	sender := getRef(m.SenderId, refs)
 	param := slack.PostMessageParameters{
-		Username: strings.TrimSpace(nameRep.Replace(sender.FullName)),
-		IconURL:  sender.MugshotURL,
+		Username:        strings.TrimSpace(nameRep.Replace(sender.FullName)),
+		IconURL:         sender.MugshotURL,
+		ThreadTimestamp: thread.TS,
 	}
-	if _, _, err = sClient.PostMessage(ch.ID, m.Body.Plain, param); err != nil {
-		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, ch.ID, ch.Name, m.Body.Plain, param)
+	if _, _, err = sClient.PostMessage(thread.ChannelID, m.Body.Plain, param); err != nil {
+		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, thread.ChannelID, thread.ChannelName, m.Body.Plain, param)
 	}
-	log.Printf("PostMessage channel%s, user:%s", ch.Name, sender.FullName)
+	log.Printf("PostMessage channel%s, user:%s", thread.ChannelName, sender.FullName)
 	//pp.Print(m)
 	return nil
 }
