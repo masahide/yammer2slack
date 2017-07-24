@@ -305,6 +305,9 @@ func getRef(id int, refs []*schema.Reference) schema.Reference {
 	}
 	return schema.Reference{}
 }
+func getGroupURL(m schema.Message, refs []*schema.Reference) string {
+	return getRef(m.GroupId, refs).WebURL
+}
 func getGroupName(m schema.Message, refs []*schema.Reference) string {
 	return getRef(m.GroupId, refs).FullName
 }
@@ -321,7 +324,7 @@ func makeChannelName(m schema.Message, refs []*schema.Reference) string {
 
 func findChannelID(chName string) string {
 	chName = strings.ToLower(chName)
-	chs, err := sClient.GetChannels(true)
+	chs, err := sClient.GetChannels(false)
 	if err != nil {
 		log.Printf("GetChannels(%s) err:%s", chName, err)
 		return ""
@@ -331,22 +334,25 @@ func findChannelID(chName string) string {
 			return ch.ID
 		}
 	}
+	log.Printf("GetChannels() Warning: not found channel name:%s", chName)
 	return ""
 }
 
-func createChannel(m schema.Message, chanName string) (ch *slack.Channel, err error) {
-	ch, err = sClient.CreateChannel(chanName)
+func createChannel(m schema.Message, thread Thread, groupURL string) (ch *slack.Channel, err error) {
+	ch, err = sClient.CreateChannel(thread.ChannelName)
 	if err != nil {
-		log.Printf("CreateChannel(%s) err:%s", chanName, err)
-		ch, err = sClient.GetChannelInfo(findChannelID(chanName))
+		log.Printf("GetChannelInfo(%s) err:%s", thread.ChannelName, err)
+		ch, err = sClient.GetChannelInfo(findChannelID(thread.ChannelName))
 		if err != nil {
-			log.Printf("GetChannelInfo:%s err:%s", chanName, err)
+			log.Printf("GetChannelInfo:%s err:%s", thread.ChannelName, err)
 		}
+	} else {
+		log.Printf("CreateChannel: %s", ch.Name)
 	}
-	log.Printf("CreateChannel: %s", ch.Name)
-	if ch.Purpose.Value, err = sClient.SetChannelPurpose(ch.ID, m.WebURL); err != nil {
-		log.Printf("SetChannelPurpose %s,err:%s", ch.Name, err)
-		return
+	thread.ChannelID = ch.ID
+	err = chJoin(thread, groupURL)
+	if err != nil {
+		log.Println(err)
 	}
 	return
 }
@@ -388,6 +394,10 @@ func getNetwork(id int) schema.Network {
 func getTS(m schema.Message, refs []*schema.Reference) (Thread, error) {
 	thread, ok := cache.ThreadMap[m.ThreadId]
 	if ok {
+		err := chJoin(thread, "")
+		if err != nil {
+			log.Println(err)
+		}
 		return thread, nil
 	}
 	yammerParentFeed, err := getParentRef(m.ThreadId)
@@ -404,7 +414,7 @@ func getTS(m schema.Message, refs []*schema.Reference) (Thread, error) {
 	}
 
 	thread.ChannelName = netWorkNameShorter(network.Name, 10) + "-" + nameShorter(groupName, 10)
-	ch, err := createChannel(m, thread.ChannelName)
+	ch, err := createChannel(m, thread, getGroupURL(m, refs))
 	if err != nil {
 		return thread, err
 	}
@@ -420,13 +430,13 @@ func getTS(m schema.Message, refs []*schema.Reference) (Thread, error) {
 		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, ch.ID, ch.Name, yammerParentFeed.Body.Plain, param)
 	}
 	cache.ThreadMap[m.ThreadId] = thread
-	chJoin(thread, yammerParentFeed)
+	//chJoin(thread, &yammerParentFeed)
 	saveJSON(cache, cacheFile)
 	return thread, nil
 }
-func chJoin(thread Thread, parent schema.Reference) error {
+func chJoin(thread Thread, url string) error {
 	ch, err := sClient.GetChannelInfo(thread.ChannelID)
-	log.Printf("GetChannelInfo(%s): [%# v]", thread.ChannelID, ch)
+	log.Printf("GetChannelInfo(%s): ch.Name:'%s'", thread.ChannelID, ch.Name)
 	if err != nil {
 		return err
 	}
@@ -443,8 +453,8 @@ func chJoin(thread Thread, parent schema.Reference) error {
 		channels[ch.Name] = ch
 		log.Printf("JoinChannel: %s", ch.Name)
 	}
-	if ch.Purpose.Value == "" {
-		if _, apierr := sClient.SetChannelPurpose(ch.ID, parent.WebURL); apierr != nil {
+	if url != "" && ch.Purpose.Value == "" {
+		if _, apierr := sClient.SetChannelPurpose(ch.ID, url); apierr != nil {
 			log.Printf("SetChannelPurpose %s,err:%s", ch.Name, apierr)
 			return apierr
 		}
@@ -466,10 +476,11 @@ func postMsg(m schema.Message, refs []*schema.Reference) error {
 		Username:        strings.TrimSpace(nameRep.Replace(sender.FullName)),
 		IconURL:         sender.MugshotURL,
 		ThreadTimestamp: thread.TS,
+		ReplyBroadcast:  true,
 	}
 	if _, _, err = sClient.PostMessage(thread.ChannelID, m.Body.Plain, param); err != nil {
-		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, thread.ChannelID, thread.ChannelName, m.Body.Plain, param)
+		log.Printf("PostMessage err:%s, channel:%s(%s), body:%s, param:%#v", err, thread.ChannelID, thread.ChannelName, m.Body.Plain, param)
 	}
-	log.Printf("PostMessage channel:%s, user:%s", thread.ChannelName, sender.FullName)
+	log.Printf("PostMessage channel:%s,ts:%s, user:%s", thread.ChannelName, thread.TS, sender.FullName)
 	return nil
 }
