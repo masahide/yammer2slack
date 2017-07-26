@@ -341,7 +341,7 @@ func findChannelID(chName string) string {
 func createChannel(m schema.Message, thread Thread, groupURL string) (ch *slack.Channel, err error) {
 	ch, err = sClient.CreateChannel(thread.ChannelName)
 	if err != nil {
-		log.Printf("GetChannelInfo(%s) err:%s", thread.ChannelName, err)
+		log.Printf("CreateChannel(%s) err:%s", thread.ChannelName, err)
 		ch, err = sClient.GetChannelInfo(findChannelID(thread.ChannelName))
 		if err != nil {
 			log.Printf("GetChannelInfo:%s err:%s", thread.ChannelName, err)
@@ -425,7 +425,7 @@ func getTS(m schema.Message, refs []*schema.Reference) (Thread, error) {
 	}
 	thread.ChannelID = ch.ID
 	body := yammerParentFeed.Body.Plain + "\nsee: " + yammerParentFeed.WebURL
-	log.Printf("PostMessage channel:%s(%s), body:%s, param:%#v", ch.ID, ch.Name, yammerParentFeed.Body.Plain, param)
+	log.Printf("PostMessage channel:%s, user:%s", ch.Name, sender.FullName)
 	if _, thread.TS, err = sClient.PostMessage(ch.ID, body, param); err != nil {
 		log.Printf("err:%s, channel:%s(%s), body:%s, param:%#v", err, ch.ID, ch.Name, yammerParentFeed.Body.Plain, param)
 	}
@@ -476,10 +476,11 @@ func postMsg(m schema.Message, refs []*schema.Reference) error {
 		Username:        strings.TrimSpace(nameRep.Replace(sender.FullName)),
 		IconURL:         sender.MugshotURL,
 		ThreadTimestamp: thread.TS,
-		ReplyBroadcast:  true,
+		ReplyBroadcast:  false,
 	}
+	log.Printf("Thread PostMessage channel:%s(%s), param:%#v", thread.ChannelID, thread.ChannelName, param)
 	if _, _, err = sClient.PostMessage(thread.ChannelID, m.Body.Plain, param); err != nil {
-		log.Printf("PostMessage err:%s, channel:%s(%s), body:%s, param:%#v", err, thread.ChannelID, thread.ChannelName, m.Body.Plain, param)
+		log.Printf("Thread PostMessage err:%s, channel:%s(%s), body:%s, param:%#v", err, thread.ChannelID, thread.ChannelName, m.Body.Plain, param)
 	}
 	log.Printf("PostMessage channel:%s,ts:%s, user:%s", thread.ChannelName, thread.TS, sender.FullName)
 	return nil
