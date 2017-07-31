@@ -476,7 +476,7 @@ func postMsg(m schema.Message, refs []*schema.Reference) error {
 		Username:        strings.TrimSpace(nameRep.Replace(sender.FullName)),
 		IconURL:         sender.MugshotURL,
 		ThreadTimestamp: thread.TS,
-		ReplyBroadcast:  false,
+		//ReplyBroadcast:  false,
 	}
 	log.Printf("Thread PostMessage channel:%s(%s), param:%#v", thread.ChannelID, thread.ChannelName, param)
 	if _, _, err = sClient.PostMessage(thread.ChannelID, m.Body.Plain, param); err != nil {
